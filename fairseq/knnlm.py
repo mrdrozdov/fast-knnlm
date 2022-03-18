@@ -110,9 +110,15 @@ class KNN_Dstore(object):
 
         # (T_reducedxB)
         yhat_knn_prob = torch.logsumexp(probs + index_mask, dim=-1).clone()
-        full_yhat_knn_prob = torch.full([qshape[0]*qshape[1]], -10000).cuda()
+        full_yhat_knn_prob = torch.full([qshape[0]*qshape[1]], -10000, dtype=torch.float).cuda()
         full_yhat_knn_prob[tgt != pad_idx] = yhat_knn_prob
 
         # TxBx1
-        return full_yhat_knn_prob.view(qshape[0], qshape[1], 1)
+        yhat_knn_prob = full_yhat_knn_prob.view(qshape[0], qshape[1], 1)
+
+        output = {}
+        output['yhat_knn_prob'] = yhat_knn_prob
+
+        return output
+
 

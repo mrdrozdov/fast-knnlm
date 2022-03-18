@@ -161,7 +161,10 @@ def main(parsed_args):
                 print('Saving fp16')
                 dstore_keys = np.memmap(args.dstore_mmap+'_keys.npy', dtype=np.float16, mode='w+', shape=(args.dstore_size, args.decoder_embed_dim))
                 dstore_vals = np.memmap(args.dstore_mmap+'_vals.npy', dtype=np.int16, mode='w+', shape=(args.dstore_size, 1))
+                dstore_prob = np.memmap(args.dstore_mmap+'_prob.npy', dtype=np.float16, mode='w+', shape=(args.dstore_size, 1))
+                dstore_src = np.memmap(args.dstore_mmap+'_src.npy', dtype=np.int16, mode='w+', shape=(args.dstore_size, 1))
             else:
+                raise Exception
                 print('Saving fp32')
                 dstore_keys = np.memmap(args.dstore_mmap+'_keys.npy', dtype=np.float32, mode='w+', shape=(args.dstore_size, args.decoder_embed_dim))
                 dstore_vals = np.memmap(args.dstore_mmap+'_vals.npy', dtype=np.int, mode='w+', shape=(args.dstore_size, 1))
@@ -175,25 +178,33 @@ def main(parsed_args):
 
             gen_timer.start()
             if args.knnlm:
-                hypos = scorer.generate(models, sample, knn_dstore=knn_dstore)
+                model_output = scorer.generate(models, sample, knn_dstore=knn_dstore)
             else:
-                hypos = scorer.generate(models, sample)
+                model_output = scorer.generate(models, sample)
             gen_timer.stop(sample['ntokens'])
+
+            hypos = model_output['hypos']
 
             for i, hypos_i in enumerate(hypos):
                 hypo = hypos_i[0]
                 if args.save_knnlm_dstore:
                     shape = hypo['dstore_keys'].shape
-                    if shape[0] == args.tokens_per_sample:
+                    if shape[0] == args.tokens_per_sample or args.no_min_context:
                         if dstore_idx + shape[0] > args.dstore_size:
                             shape = [args.dstore_size - dstore_idx]
                             hypo['dstore_keys'] = hypo['dstore_keys'][:shape[0]]
+
                         if args.dstore_fp16:
                             dstore_keys[dstore_idx:shape[0]+dstore_idx] = hypo['dstore_keys'].view(
                                 -1, args.decoder_embed_dim).cpu().numpy().astype(np.float16)
                             dstore_vals[dstore_idx:shape[0]+dstore_idx] = hypo['tokens'].view(
                                 -1, 1).cpu().numpy().astype(np.int16)
+                            dstore_src[dstore_idx:shape[0]+dstore_idx] = hypo['src_tokens'].view(
+                                -1, 1).cpu().numpy().astype(np.int16)
+                            dstore_prob[dstore_idx:shape[0]+dstore_idx] = hypo['positional_scores'].view(
+                                -1, 1).cpu().numpy().astype(np.float16)
                         else:
+                            raise Exception
                             dstore_keys[dstore_idx:shape[0]+dstore_idx] = hypo['dstore_keys'].view(
                                 -1, args.decoder_embed_dim).cpu().numpy().astype(np.float32)
                             dstore_vals[dstore_idx:shape[0]+dstore_idx] = hypo['tokens'].view(

@@ -98,10 +98,11 @@ class SequenceScorer(object):
                 if len(models) != 1:
                     raise ValueError('Only knn *log* probs are supported.')
 
-                yhat_knn_prob = dstore.get_knn_log_prob(
+                knn_output = dstore.get_knn_log_prob(
                         queries,
                         orig_target.permute(1, 0),
                         pad_idx=self.pad)
+                yhat_knn_prob = knn_output['yhat_knn_prob']
                 yhat_knn_prob = yhat_knn_prob.permute(1, 0, 2).squeeze(-1)
                 if self.args.fp16:
                     yhat_knn_prob = yhat_knn_prob.half()
@@ -131,8 +132,16 @@ class SequenceScorer(object):
         start_idxs = sample['start_indices'] if 'start_indices' in sample else [0] * bsz
         for i in range(bsz):
             # remove padding from ref
+            input_ref = sample['net_input']['src_tokens'][i, start_idxs[i]:][sample['target'][i, start_idxs[i]:] != self.pad]
             ref = utils.strip_pad(sample['target'][i, start_idxs[i]:], self.pad) \
                 if sample['target'] is not None else None
+            assert input_ref.shape == ref.shape
+            #
+
+            mask = sample['target'][i, start_idxs[i]:] != self.pad
+            dstore_keys = decoder_out[1][self.args.knn_keytype][start_idxs[i]:,i,:] if self.args.save_knnlm_dstore else None
+            dstore_keys = dstore_keys[mask]
+
             tgt_len = ref.numel()
             avg_probs_i = avg_probs[i][start_idxs[i]:start_idxs[i] + tgt_len]
             score_i = avg_probs_i.sum() / tgt_len
@@ -152,10 +161,18 @@ class SequenceScorer(object):
                 avg_attn_i = alignment = None
             hypos.append([{
                 'tokens': ref,
+                'src_tokens': input_ref,
                 'score': score_i,
                 'attention': avg_attn_i,
                 'alignment': alignment,
                 'positional_scores': avg_probs_i,
-                'dstore_keys': decoder_out[1][self.args.knn_keytype][start_idxs[i]:,i,:] if self.args.save_knnlm_dstore else None,
+                'dstore_keys':  dstore_keys
             }])
-        return hypos
+
+        model_output = {}
+        model_output['probs'] = probs
+        model_output['hypos'] = hypos
+
+        return model_output
+
+
